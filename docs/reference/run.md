@@ -1140,6 +1140,8 @@ container's `/etc/hosts` entry will be automatically updated.
            If 'host-dir' is missing, then docker creates a new volume.
 		   If neither 'rw' or 'ro' is specified then the volume is mounted
 		   in read-write mode.
+    -v=[]: Create a tmpfs mount with: tmpfs:[container-dir].
+           Underlying content from the "container-dir" is copied into the tmpfs.
     --volumes-from="": Mount all volumes from the given container(s)
 
 The volumes commands are complex enough to have their own documentation
