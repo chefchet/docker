@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	// TODO Windows: Factor out ulimit
-	"github.com/docker/libcontainer/configs"
+	"github.com/opencontainers/runc/libcontainer/configs"
 )
 
 type Mount struct {
