@@ -127,14 +127,6 @@ type ResourceStats struct {
 	SystemUsage uint64    `json:"system_usage"`
 }
 
-type Mount struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-	Writable    bool   `json:"writable"`
-	Private     bool   `json:"private"`
-	Slave       bool   `json:"slave"`
-}
-
 // Describes a process that will be run inside a container.
 type ProcessConfig struct {
 	exec.Cmd `json:"-"`
@@ -181,4 +173,5 @@ type Command struct {
 	FirstStart         bool              `json:"first_start"`
 	LayerPaths         []string          `json:"layer_paths"` // Windows needs to know the layer paths and folder for a command
 	LayerFolder        string            `json:"layer_folder"`
+	TmpDir             string            `json:"tmpdir"` // Directory used to store docker tmpdirs.
 }
