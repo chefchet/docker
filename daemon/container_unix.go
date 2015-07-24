@@ -24,6 +24,7 @@ import (
 	"github.com/docker/docker/pkg/nat"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/pkg/system"
+	"github.com/docker/docker/pkg/systemd"
 	"github.com/docker/docker/pkg/ulimit"
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/docker/utils"
@@ -1217,4 +1218,17 @@ func (container *Container) removeMountPoints() error {
 		}
 	}
 	return nil
+}
+
+/*
+Register Machine with systemd.  There is a potential race condition here
+where the container could have exited before the call gets made.  This
+call requires the container.Pid.  Therefore we just log the situation
+rather then fail the container
+*/
+func (container *Container) registerMachine() {
+	err := systemd.RegisterMachine(container.Name[1:], container.ID, container.Pid, "/")
+	if err != nil {
+		logrus.Errorf("Unable to RegisterMachine %s for %s: %s", container.Name[1:], container.ID, err)
+	}
 }

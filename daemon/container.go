@@ -761,6 +761,8 @@ func (container *Container) waitForStart() error {
 		return err
 	}
 
+	container.registerMachine()
+
 	return nil
 }
 
