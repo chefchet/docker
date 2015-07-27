@@ -379,10 +379,9 @@ func (s *DockerSuite) TestRunCreateVolumeWithSymlink(c *check.C) {
 		c.Fatalf("[run] err: %v, exitcode: %d", err, exitCode)
 	}
 
-	var volPath string
-	volPath, exitCode, err = dockerCmdWithError(c, "inspect", "-f", "{{range .Volumes}}{{.}}{{end}}", "test-createvolumewithsymlink")
-	if err != nil || exitCode != 0 {
-		c.Fatalf("[inspect] err: %v, exitcode: %d", err, exitCode)
+	volPath, err := inspectMountSourceField("test-createvolumewithsymlink", "/bar/foo")
+	if err != nil {
+		c.Fatalf("[inspect] err: %v", err)
 	}
 
 	_, exitCode, err = dockerCmdWithError(c, "rm", "-v", "test-createvolumewithsymlink")
@@ -390,8 +389,7 @@ func (s *DockerSuite) TestRunCreateVolumeWithSymlink(c *check.C) {
 		c.Fatalf("[rm] err: %v, exitcode: %d", err, exitCode)
 	}
 
-	f, err := os.Open(volPath)
-	defer f.Close()
+	_, err = os.Stat(volPath)
 	if !os.IsNotExist(err) {
 		c.Fatalf("[open] (expecting 'file does not exist' error) err: %v, volPath: %s", err, volPath)
 	}
@@ -747,6 +745,7 @@ func (s *DockerSuite) TestRunCapAddALLDropNetAdminCanDownInterface(c *check.C) {
 }
 
 func (s *DockerSuite) TestRunGroupAdd(c *check.C) {
+	testRequires(c, NativeExecDriver)
 	out, _ := dockerCmd(c, "run", "--group-add=audio", "--group-add=dbus", "--group-add=777", "busybox", "sh", "-c", "id")
 
 	groupsList := "uid=0(root) gid=0(root) groups=10(wheel),29(audio),81(dbus),777"
@@ -1035,10 +1034,9 @@ func (s *DockerSuite) TestRunDnsOptionsBasedOnHostResolvConf(c *check.C) {
 // Test to see if a non-root user can resolve a DNS name and reach out to it. Also
 // check if the container resolv.conf file has atleast 0644 perm.
 func (s *DockerSuite) TestRunNonRootUserResolvName(c *check.C) {
-	testRequires(c, SameHostDaemon)
-	testRequires(c, Network)
+	testRequires(c, SameHostDaemon, Network)
 
-	dockerCmd(c, "run", "--name=testperm", "--user=default", "busybox", "ping", "-c", "1", "www.docker.io")
+	dockerCmd(c, "run", "--name=testperm", "--user=default", "busybox", "ping", "-c", "1", "apt.dockerproject.org")
 
 	cID, err := getIDByName("testperm")
 	if err != nil {
@@ -2480,6 +2478,7 @@ func (s *DockerSuite) TestDevicePermissions(c *check.C) {
 }
 
 func (s *DockerSuite) TestRunCapAddCHOWN(c *check.C) {
+	testRequires(c, NativeExecDriver)
 	out, _ := dockerCmd(c, "run", "--cap-drop=ALL", "--cap-add=CHOWN", "busybox", "sh", "-c", "adduser -D -H newuser && chown newuser /home && echo ok")
 
 	if actual := strings.Trim(out, "\r\n"); actual != "ok" {
@@ -2507,7 +2506,7 @@ func (s *DockerSuite) TestVolumeFromMixedRWOptions(c *check.C) {
 }
 
 func (s *DockerSuite) TestRunWriteFilteredProc(c *check.C) {
-	testRequires(c, Apparmor)
+	testRequires(c, Apparmor, NativeExecDriver)
 
 	testWritePaths := []string{
 		/* modprobe and core_pattern should both be denied by generic
@@ -2547,5 +2546,161 @@ func (s *DockerSuite) TestRunNetworkFilesBindMount(c *check.C) {
 	actual, _ = dockerCmd(c, "run", "-v", filename+":/etc/resolv.conf", "busybox", "cat", "/etc/resolv.conf")
 	if actual != expected {
 		c.Fatalf("expected resolv.conf be: %q, but was: %q", expected, actual)
+	}
+}
+
+func (s *DockerTrustSuite) TestTrustedRun(c *check.C) {
+	repoName := s.setupTrustedImage(c, "trusted-run")
+
+	// Try run
+	runCmd := exec.Command(dockerBinary, "run", repoName)
+	s.trustedCmd(runCmd)
+	out, _, err := runCommandWithOutput(runCmd)
+	if err != nil {
+		c.Fatalf("Error running trusted run: %s\n%s\n", err, out)
+	}
+
+	if !strings.Contains(string(out), "Tagging") {
+		c.Fatalf("Missing expected output on trusted push:\n%s", out)
+	}
+
+	dockerCmd(c, "rmi", repoName)
+
+	// Try untrusted run to ensure we pushed the tag to the registry
+	runCmd = exec.Command(dockerBinary, "run", "--disable-content-trust=true", repoName)
+	s.trustedCmd(runCmd)
+	out, _, err = runCommandWithOutput(runCmd)
+	if err != nil {
+		c.Fatalf("Error running trusted run: %s\n%s", err, out)
+	}
+
+	if !strings.Contains(string(out), "Status: Downloaded") {
+		c.Fatalf("Missing expected output on trusted run with --disable-content-trust:\n%s", out)
+	}
+}
+
+func (s *DockerTrustSuite) TestUntrustedRun(c *check.C) {
+	repoName := fmt.Sprintf("%v/dockercli/trusted:latest", privateRegistryURL)
+	// tag the image and upload it to the private registry
+	dockerCmd(c, "tag", "busybox", repoName)
+	dockerCmd(c, "push", repoName)
+	dockerCmd(c, "rmi", repoName)
+
+	// Try trusted run on untrusted tag
+	runCmd := exec.Command(dockerBinary, "run", repoName)
+	s.trustedCmd(runCmd)
+	out, _, err := runCommandWithOutput(runCmd)
+	if err == nil {
+		c.Fatalf("Error expected when running trusted run with:\n%s", out)
+	}
+
+	if !strings.Contains(string(out), "no trust data available") {
+		c.Fatalf("Missing expected output on trusted run:\n%s", out)
+	}
+}
+
+func (s *DockerTrustSuite) TestRunWhenCertExpired(c *check.C) {
+	repoName := s.setupTrustedImage(c, "trusted-run-expired")
+
+	// Certificates have 10 years of expiration
+	elevenYearsFromNow := time.Now().Add(time.Hour * 24 * 365 * 11)
+
+	runAtDifferentDate(elevenYearsFromNow, func() {
+		// Try run
+		runCmd := exec.Command(dockerBinary, "run", repoName)
+		s.trustedCmd(runCmd)
+		out, _, err := runCommandWithOutput(runCmd)
+		if err == nil {
+			c.Fatalf("Error running trusted run in the distant future: %s\n%s", err, out)
+		}
+
+		if !strings.Contains(string(out), "could not validate the path to a trusted root") {
+			c.Fatalf("Missing expected output on trusted run in the distant future:\n%s", out)
+		}
+	})
+
+	runAtDifferentDate(elevenYearsFromNow, func() {
+		// Try run
+		runCmd := exec.Command(dockerBinary, "run", "--disable-content-trust", repoName)
+		s.trustedCmd(runCmd)
+		out, _, err := runCommandWithOutput(runCmd)
+		if err != nil {
+			c.Fatalf("Error running untrusted run in the distant future: %s\n%s", err, out)
+		}
+
+		if !strings.Contains(string(out), "Status: Downloaded") {
+			c.Fatalf("Missing expected output on untrusted run in the distant future:\n%s", out)
+		}
+	})
+}
+
+func (s *DockerTrustSuite) TestTrustedRunFromBadTrustServer(c *check.C) {
+	repoName := fmt.Sprintf("%v/dockerclievilrun/trusted:latest", privateRegistryURL)
+	evilLocalConfigDir, err := ioutil.TempDir("", "evil-local-config-dir")
+	if err != nil {
+		c.Fatalf("Failed to create local temp dir")
+	}
+
+	// tag the image and upload it to the private registry
+	dockerCmd(c, "tag", "busybox", repoName)
+
+	pushCmd := exec.Command(dockerBinary, "push", repoName)
+	s.trustedCmd(pushCmd)
+	out, _, err := runCommandWithOutput(pushCmd)
+	if err != nil {
+		c.Fatalf("Error running trusted push: %s\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Signing and pushing trust metadata") {
+		c.Fatalf("Missing expected output on trusted push:\n%s", out)
+	}
+
+	dockerCmd(c, "rmi", repoName)
+
+	// Try run
+	runCmd := exec.Command(dockerBinary, "run", repoName)
+	s.trustedCmd(runCmd)
+	out, _, err = runCommandWithOutput(runCmd)
+	if err != nil {
+		c.Fatalf("Error running trusted run: %s\n%s", err, out)
+	}
+
+	if !strings.Contains(string(out), "Tagging") {
+		c.Fatalf("Missing expected output on trusted push:\n%s", out)
+	}
+
+	dockerCmd(c, "rmi", repoName)
+
+	// Kill the notary server, start a new "evil" one.
+	s.not.Close()
+	s.not, err = newTestNotary(c)
+	if err != nil {
+		c.Fatalf("Restarting notary server failed.")
+	}
+
+	// In order to make an evil server, lets re-init a client (with a different trust dir) and push new data.
+	// tag an image and upload it to the private registry
+	dockerCmd(c, "--config", evilLocalConfigDir, "tag", "busybox", repoName)
+
+	// Push up to the new server
+	pushCmd = exec.Command(dockerBinary, "--config", evilLocalConfigDir, "push", repoName)
+	s.trustedCmd(pushCmd)
+	out, _, err = runCommandWithOutput(pushCmd)
+	if err != nil {
+		c.Fatalf("Error running trusted push: %s\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Signing and pushing trust metadata") {
+		c.Fatalf("Missing expected output on trusted push:\n%s", out)
+	}
+
+	// Now, try running with the original client from this new trust server. This should fail.
+	runCmd = exec.Command(dockerBinary, "run", repoName)
+	s.trustedCmd(runCmd)
+	out, _, err = runCommandWithOutput(runCmd)
+	if err == nil {
+		c.Fatalf("Expected to fail on this run due to different remote data: %s\n%s", err, out)
+	}
+
+	if !strings.Contains(string(out), "failed to validate data with current trusted certificates") {
+		c.Fatalf("Missing expected output on trusted push:\n%s", out)
 	}
 }

@@ -2,10 +2,14 @@ package registry
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -21,17 +25,10 @@ import (
 )
 
 var (
+	// ErrAlreadyExists is an error returned if an image being pushed
+	// already exists on the remote side
 	ErrAlreadyExists = errors.New("Image already exists")
-	ErrDoesNotExist  = errors.New("Image does not exist")
 	errLoginRequired = errors.New("Authentication is required.")
-)
-
-type TimeoutType uint32
-
-const (
-	NoTimeout TimeoutType = iota
-	ReceiveTimeout
-	ConnectTimeout
 )
 
 // dockerUserAgent is the User-Agent the Docker client uses to identify itself.
@@ -61,6 +58,54 @@ func hasFile(files []os.FileInfo, name string) bool {
 	return false
 }
 
+// ReadCertsDirectory reads the directory for TLS certificates
+// including roots and certificate pairs and updates the
+// provided TLS configuration.
+func ReadCertsDirectory(tlsConfig *tls.Config, directory string) error {
+	fs, err := ioutil.ReadDir(directory)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	for _, f := range fs {
+		if strings.HasSuffix(f.Name(), ".crt") {
+			if tlsConfig.RootCAs == nil {
+				// TODO(dmcgowan): Copy system pool
+				tlsConfig.RootCAs = x509.NewCertPool()
+			}
+			logrus.Debugf("crt: %s", filepath.Join(directory, f.Name()))
+			data, err := ioutil.ReadFile(filepath.Join(directory, f.Name()))
+			if err != nil {
+				return err
+			}
+			tlsConfig.RootCAs.AppendCertsFromPEM(data)
+		}
+		if strings.HasSuffix(f.Name(), ".cert") {
+			certName := f.Name()
+			keyName := certName[:len(certName)-5] + ".key"
+			logrus.Debugf("cert: %s", filepath.Join(directory, f.Name()))
+			if !hasFile(fs, keyName) {
+				return fmt.Errorf("Missing key %s for certificate %s", keyName, certName)
+			}
+			cert, err := tls.LoadX509KeyPair(filepath.Join(directory, certName), filepath.Join(directory, keyName))
+			if err != nil {
+				return err
+			}
+			tlsConfig.Certificates = append(tlsConfig.Certificates, cert)
+		}
+		if strings.HasSuffix(f.Name(), ".key") {
+			keyName := f.Name()
+			certName := keyName[:len(keyName)-4] + ".cert"
+			logrus.Debugf("key: %s", filepath.Join(directory, f.Name()))
+			if !hasFile(fs, certName) {
+				return fmt.Errorf("Missing certificate %s for key %s", certName, keyName)
+			}
+		}
+	}
+
+	return nil
+}
+
 // DockerHeaders returns request modifiers that ensure requests have
 // the User-Agent header set to dockerUserAgent and that metaHeaders
 // are added.
@@ -74,10 +119,12 @@ func DockerHeaders(metaHeaders http.Header) []transport.RequestModifier {
 	return modifiers
 }
 
+// HTTPClient returns a HTTP client structure which uses the given transport
+// and contains the necessary headers for redirected requests
 func HTTPClient(transport http.RoundTripper) *http.Client {
 	return &http.Client{
 		Transport:     transport,
-		CheckRedirect: AddRequiredHeadersToRedirectedRequests,
+		CheckRedirect: addRequiredHeadersToRedirectedRequests,
 	}
 }
 
@@ -98,7 +145,9 @@ func trustedLocation(req *http.Request) bool {
 	return false
 }
 
-func AddRequiredHeadersToRedirectedRequests(req *http.Request, via []*http.Request) error {
+// addRequiredHeadersToRedirectedRequests adds the necessary redirection headers
+// for redirected requests
+func addRequiredHeadersToRedirectedRequests(req *http.Request, via []*http.Request) error {
 	if via != nil && via[0] != nil {
 		if trustedLocation(req) && trustedLocation(via[0]) {
 			req.Header = via[0].Header
@@ -124,6 +173,8 @@ func shouldV2Fallback(err errcode.Error) bool {
 	return false
 }
 
+// ErrNoSupport is an error type used for errors indicating that an operation
+// is not supported. It encapsulates a more specific error.
 type ErrNoSupport struct{ Err error }
 
 func (e ErrNoSupport) Error() string {
@@ -133,6 +184,8 @@ func (e ErrNoSupport) Error() string {
 	return e.Err.Error()
 }
 
+// ContinueOnError returns true if we should fallback to the next endpoint
+// as a result of this error.
 func ContinueOnError(err error) bool {
 	switch v := err.(type) {
 	case errcode.Errors:
@@ -145,6 +198,8 @@ func ContinueOnError(err error) bool {
 	return false
 }
 
+// NewTransport returns a new HTTP transport. If tlsConfig is nil, it uses the
+// default TLS configuration.
 func NewTransport(tlsConfig *tls.Config) *http.Transport {
 	if tlsConfig == nil {
 		var cfg = tlsconfig.ServerDefault
