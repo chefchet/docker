@@ -1205,12 +1205,8 @@ func (s *Server) getContainersByName(version version.Version, w http.ResponseWri
 		return fmt.Errorf("Missing parameter")
 	}
 
-	if version.LessThan("1.20") {
-		containerJSONRaw, err := s.daemon.ContainerInspectPre120(vars["name"])
-		if err != nil {
-			return err
-		}
-		return writeJSON(w, http.StatusOK, containerJSONRaw)
+	if version.LessThan("1.20") && runtime.GOOS != "windows" {
+		return getContainersByNameDownlevel(w, s, vars["name"])
 	}
 
 	containerJSON, err := s.daemon.ContainerInspect(vars["name"])
@@ -1555,7 +1551,7 @@ func (s *Server) initTcpSocket(addr string) (l net.Listener, err error) {
 	if s.cfg.TLSConfig == nil || s.cfg.TLSConfig.ClientAuth != tls.RequireAndVerifyClientCert {
 		logrus.Warn("/!\\ DON'T BIND ON ANY IP ADDRESS WITHOUT setting -tlsverify IF YOU DON'T KNOW WHAT YOU'RE DOING /!\\")
 	}
-	if l, err = sockets.NewTcpSocket(addr, s.cfg.TLSConfig, s.start); err != nil {
+	if l, err = sockets.NewTCPSocket(addr, s.cfg.TLSConfig, s.start); err != nil {
 		return nil, err
 	}
 	if err := allocateDaemonPort(addr); err != nil {

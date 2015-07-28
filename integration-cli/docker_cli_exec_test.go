@@ -148,7 +148,7 @@ func (s *DockerSuite) TestExecPausedContainer(c *check.C) {
 	ContainerID := strings.TrimSpace(out)
 
 	dockerCmd(c, "pause", "testing")
-	out, _, err := dockerCmdWithError(c, "exec", "-i", "-t", ContainerID, "echo", "hello")
+	out, _, err := dockerCmdWithError("exec", "-i", "-t", ContainerID, "echo", "hello")
 	if err == nil {
 		c.Fatal("container should fail to exec new command if it is paused")
 	}
@@ -268,7 +268,7 @@ func (s *DockerSuite) TestExecCgroup(c *check.C) {
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {
-			out, _, err := dockerCmdWithError(c, "exec", "testing", "cat", "/proc/self/cgroup")
+			out, _, err := dockerCmdWithError("exec", "testing", "cat", "/proc/self/cgroup")
 			if err != nil {
 				errChan <- err
 				return
@@ -368,6 +368,17 @@ func (s *DockerSuite) TestInspectExecID(c *check.C) {
 	sc, body, err := sockRequest("GET", "/exec/"+execID+"/json", nil)
 	if sc != http.StatusOK {
 		c.Fatalf("received status != 200 OK: %d\n%s", sc, body)
+	}
+
+	// Now delete the container and then an 'inspect' on the exec should
+	// result in a 404 (not 'container not running')
+	out, ec := dockerCmd(c, "rm", "-f", id)
+	if ec != 0 {
+		c.Fatalf("error removing container: %s", out)
+	}
+	sc, body, err = sockRequest("GET", "/exec/"+execID+"/json", nil)
+	if sc != http.StatusNotFound {
+		c.Fatalf("received status != 404: %s\n%s", sc, body)
 	}
 }
 

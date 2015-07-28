@@ -4118,6 +4118,27 @@ func (s *DockerSuite) TestBuildFromGITWithContext(c *check.C) {
 	}
 }
 
+func (s *DockerSuite) TestBuildFromGITwithF(c *check.C) {
+	name := "testbuildfromgitwithf"
+	git, err := newFakeGit("repo", map[string]string{
+		"myApp/myDockerfile": `FROM busybox
+					RUN echo hi from Dockerfile`,
+	}, true)
+	if err != nil {
+		c.Fatal(err)
+	}
+	defer git.Close()
+
+	out, _, err := dockerCmdWithError("build", "-t", name, "--no-cache", "-f", "myApp/myDockerfile", git.RepoURL)
+	if err != nil {
+		c.Fatalf("Error on build. Out: %s\nErr: %v", out, err)
+	}
+
+	if !strings.Contains(out, "hi from Dockerfile") {
+		c.Fatalf("Missing expected output, got:\n%s", out)
+	}
+}
+
 func (s *DockerSuite) TestBuildFromRemoteTarball(c *check.C) {
 	name := "testbuildfromremotetarball"
 
@@ -4343,7 +4364,7 @@ func (s *DockerSuite) TestBuildEntrypointInheritance(c *check.C) {
 		c.Fatal(err)
 	}
 
-	if _, status, _ := dockerCmdWithError(c, "run", "parent"); status != 130 {
+	if _, status, _ := dockerCmdWithError("run", "parent"); status != 130 {
 		c.Fatalf("expected exit code 130 but received %d", status)
 	}
 
@@ -4354,7 +4375,7 @@ func (s *DockerSuite) TestBuildEntrypointInheritance(c *check.C) {
 		c.Fatal(err)
 	}
 
-	if _, status, _ := dockerCmdWithError(c, "run", "child"); status != 5 {
+	if _, status, _ := dockerCmdWithError("run", "child"); status != 5 {
 		c.Fatalf("expected exit code 5 but received %d", status)
 	}
 
@@ -4450,7 +4471,7 @@ func (s *DockerSuite) TestBuildVerifySingleQuoteFails(c *check.C) {
 		c.Fatal(err)
 	}
 
-	if _, _, err := dockerCmdWithError(c, "run", "--rm", name); err == nil {
+	if _, _, err := dockerCmdWithError("run", "--rm", name); err == nil {
 		c.Fatal("The image was not supposed to be able to run")
 	}
 
@@ -4996,7 +5017,7 @@ func (s *DockerSuite) TestBuildDockerfileOutsideContext(c *check.C) {
 		filepath.Join(ctx, "dockerfile1"),
 		filepath.Join(ctx, "dockerfile2"),
 	} {
-		out, _, err := dockerCmdWithError(c, "build", "-t", name, "--no-cache", "-f", dockerfilePath, ".")
+		out, _, err := dockerCmdWithError("build", "-t", name, "--no-cache", "-f", dockerfilePath, ".")
 		if err == nil {
 			c.Fatalf("Expected error with %s. Out: %s", dockerfilePath, out)
 		}
@@ -5010,7 +5031,7 @@ func (s *DockerSuite) TestBuildDockerfileOutsideContext(c *check.C) {
 
 	// Path to Dockerfile should be resolved relative to working directory, not relative to context.
 	// There is a Dockerfile in the context, but since there is no Dockerfile in the current directory, the following should fail
-	out, _, err := dockerCmdWithError(c, "build", "-t", name, "--no-cache", "-f", "Dockerfile", ctx)
+	out, _, err := dockerCmdWithError("build", "-t", name, "--no-cache", "-f", "Dockerfile", ctx)
 	if err == nil {
 		c.Fatalf("Expected error. Out: %s", out)
 	}
@@ -5371,5 +5392,43 @@ func (s *DockerTrustSuite) TestTrustedBuildUntrustedTag(c *check.C) {
 
 	if !strings.Contains(out, fmt.Sprintf("no trust data available")) {
 		c.Fatalf("Unexpected output on trusted build with untrusted tag:\n%s", out)
+	}
+}
+
+func (s *DockerTrustSuite) TestBuildContextDirIsSymlink(c *check.C) {
+	tempDir, err := ioutil.TempDir("", "test-build-dir-is-symlink-")
+	if err != nil {
+		c.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Make a real context directory in this temp directory with a simple
+	// Dockerfile.
+	realContextDirname := filepath.Join(tempDir, "context")
+	if err := os.Mkdir(realContextDirname, os.FileMode(0755)); err != nil {
+		c.Fatal(err)
+	}
+
+	if err = ioutil.WriteFile(
+		filepath.Join(realContextDirname, "Dockerfile"),
+		[]byte(`
+			FROM busybox
+			RUN echo hello world
+		`),
+		os.FileMode(0644),
+	); err != nil {
+		c.Fatal(err)
+	}
+
+	// Make a symlink to the real context directory.
+	contextSymlinkName := filepath.Join(tempDir, "context_link")
+	if err := os.Symlink(realContextDirname, contextSymlinkName); err != nil {
+		c.Fatal(err)
+	}
+
+	// Executing the build with the symlink as the specified context should
+	// *not* fail.
+	if out, exitStatus := dockerCmd(c, "build", contextSymlinkName); exitStatus != 0 {
+		c.Fatalf("build failed with exit status %d: %s", exitStatus, out)
 	}
 }

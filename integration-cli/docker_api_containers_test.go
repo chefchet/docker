@@ -329,7 +329,7 @@ func (s *DockerSuite) TestGetContainerStatsRmRunning(c *check.C) {
 	c.Assert(err, check.IsNil)
 
 	// Now remove without `-f` and make sure we are still pulling stats
-	_, _, err = dockerCmdWithError(c, "rm", id)
+	_, _, err = dockerCmdWithError("rm", id)
 	c.Assert(err, check.Not(check.IsNil), check.Commentf("rm should have failed but didn't"))
 	_, err = buf.ReadTimeout(b, 2*time.Second)
 	c.Assert(err, check.IsNil)
@@ -1686,4 +1686,14 @@ func (s *DockerSuite) TestPostContainersStartWithLinksInHostConfigIdLinked(c *ch
 	c.Assert(err, check.IsNil)
 	c.Assert(res.StatusCode, check.Equals, http.StatusNoContent)
 	b.Close()
+}
+
+// #14915
+func (s *DockerSuite) TestContainersApiCreateNoHostConfig118(c *check.C) {
+	config := struct {
+		Image string
+	}{"busybox"}
+	status, _, err := sockRequest("POST", "/v1.18/containers/create", config)
+	c.Assert(err, check.IsNil)
+	c.Assert(status, check.Equals, http.StatusCreated)
 }

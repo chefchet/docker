@@ -193,7 +193,7 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 		}
 	}
 
-	var pfile *pidfile.PidFile
+	var pfile *pidfile.PIDFile
 	if cli.Pidfile != "" {
 		pf, err := pidfile.New(cli.Pidfile)
 		if err != nil {
@@ -212,10 +212,8 @@ func (cli *DaemonCli) CmdDaemon(args ...string) error {
 	}
 
 	serverConfig := &apiserver.ServerConfig{
-		Logging:     true,
-		EnableCors:  cli.EnableCors,
-		CorsHeaders: cli.CorsHeaders,
-		Version:     dockerversion.VERSION,
+		Logging: true,
+		Version: dockerversion.VERSION,
 	}
 	serverConfig = setPlatformServerConfig(serverConfig, cli.Config)
 

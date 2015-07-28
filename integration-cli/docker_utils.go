@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -354,6 +355,36 @@ func sockRequest(method, endpoint string, data interface{}) (int, []byte, error)
 }
 
 func sockRequestRaw(method, endpoint string, data io.Reader, ct string) (*http.Response, io.ReadCloser, error) {
+	req, client, err := newRequestClient(method, endpoint, data, ct)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		client.Close()
+		return nil, nil, err
+	}
+	body := ioutils.NewReadCloserWrapper(resp.Body, func() error {
+		defer resp.Body.Close()
+		return client.Close()
+	})
+
+	return resp, body, nil
+}
+
+func sockRequestHijack(method, endpoint string, data io.Reader, ct string) (net.Conn, *bufio.Reader, error) {
+	req, client, err := newRequestClient(method, endpoint, data, ct)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	client.Do(req)
+	conn, br := client.Hijack()
+	return conn, br, nil
+}
+
+func newRequestClient(method, endpoint string, data io.Reader, ct string) (*http.Request, *httputil.ClientConn, error) {
 	c, err := sockConn(time.Duration(10 * time.Second))
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not dial docker daemon: %v", err)
@@ -370,18 +401,7 @@ func sockRequestRaw(method, endpoint string, data io.Reader, ct string) (*http.R
 	if ct != "" {
 		req.Header.Set("Content-Type", ct)
 	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		client.Close()
-		return nil, nil, fmt.Errorf("could not perform request: %v", err)
-	}
-	body := ioutils.NewReadCloserWrapper(resp.Body, func() error {
-		defer resp.Body.Close()
-		return client.Close()
-	})
-
-	return resp, body, nil
+	return req, client, nil
 }
 
 func readBody(b io.ReadCloser) ([]byte, error) {
@@ -561,7 +581,7 @@ func pullImageIfNotExist(image string) (err error) {
 	return
 }
 
-func dockerCmdWithError(c *check.C, args ...string) (string, int, error) {
+func dockerCmdWithError(args ...string) (string, int, error) {
 	return runCommandWithOutput(exec.Command(dockerBinary, args...))
 }
 
@@ -857,10 +877,26 @@ COPY . /static`); err != nil {
 		return nil, fmt.Errorf("failed to find container port: err=%v\nout=%s", err, out)
 	}
 
+	fileserverHostPort := strings.Trim(out, "\n")
+	_, port, err := net.SplitHostPort(fileserverHostPort)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse file server host:port: %v", err)
+	}
+
+	dockerHostURL, err := url.Parse(daemonHost())
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse daemon host URL: %v", err)
+	}
+
+	host, _, err := net.SplitHostPort(dockerHostURL.Host)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse docker daemon host:port: %v", err)
+	}
+
 	return &remoteFileServer{
 		container: container,
 		image:     image,
-		host:      strings.Trim(out, "\n"),
+		host:      fmt.Sprintf("%s:%s", host, port),
 		ctx:       ctx}, nil
 }
 

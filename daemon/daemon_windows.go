@@ -73,6 +73,10 @@ func checkKernel() error {
 	return nil
 }
 
+func (daemon *Daemon) adaptContainerSettings(hostConfig *runconfig.HostConfig) {
+	// TODO Windows.
+}
+
 func (daemon *Daemon) verifyContainerSettings(hostConfig *runconfig.HostConfig, config *runconfig.Config) ([]string, error) {
 	// TODO Windows. Verifications TBC
 	return nil, nil
@@ -164,4 +168,15 @@ func (daemon *Daemon) RegisterLinks(container *Container, hostConfig *runconfig.
 		return err
 	}
 	return nil
+}
+
+func (daemon *Daemon) newBaseContainer(id string) Container {
+	return Container{
+		CommonContainer: CommonContainer{
+			ID:           id,
+			State:        NewState(),
+			execCommands: newExecStore(),
+			root:         daemon.containerRoot(id),
+		},
+	}
 }

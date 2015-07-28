@@ -108,13 +108,23 @@ func checkKernel() error {
 	if k, err := kernel.GetKernelVersion(); err != nil {
 		logrus.Warnf("%s", err)
 	} else {
-		if kernel.CompareKernelVersion(k, &kernel.KernelVersionInfo{Kernel: 3, Major: 10, Minor: 0}) < 0 {
+		if kernel.CompareKernelVersion(*k, kernel.VersionInfo{Kernel: 3, Major: 10, Minor: 0}) < 0 {
 			if os.Getenv("DOCKER_NOWARN_KERNEL_VERSION") == "" {
 				logrus.Warnf("You are running linux kernel version %s, which might be unstable running docker. Please upgrade your kernel to 3.10.0.", k.String())
 			}
 		}
 	}
 	return nil
+}
+
+func (daemon *Daemon) adaptContainerSettings(hostConfig *runconfig.HostConfig) {
+	if hostConfig == nil {
+		return
+	}
+	if hostConfig.Memory > 0 && hostConfig.MemorySwap == 0 {
+		// By default, MemorySwap is set to twice the size of Memory.
+		hostConfig.MemorySwap = hostConfig.Memory * 2
+	}
 }
 
 func (daemon *Daemon) verifyContainerSettings(hostConfig *runconfig.HostConfig, config *runconfig.Config) ([]string, error) {
@@ -175,15 +185,15 @@ func (daemon *Daemon) verifyContainerSettings(hostConfig *runconfig.HostConfig, 
 	if hostConfig.MemorySwappiness != -1 && (hostConfig.MemorySwappiness < 0 || hostConfig.MemorySwappiness > 100) {
 		return warnings, fmt.Errorf("Invalid value: %d, valid memory swappiness range is 0-100.", hostConfig.MemorySwappiness)
 	}
-	if hostConfig.CpuPeriod > 0 && !daemon.SystemConfig().CpuCfsPeriod {
+	if hostConfig.CPUPeriod > 0 && !daemon.SystemConfig().CpuCfsPeriod {
 		warnings = append(warnings, "Your kernel does not support CPU cfs period. Period discarded.")
 		logrus.Warnf("Your kernel does not support CPU cfs period. Period discarded.")
-		hostConfig.CpuPeriod = 0
+		hostConfig.CPUPeriod = 0
 	}
-	if hostConfig.CpuQuota > 0 && !daemon.SystemConfig().CpuCfsQuota {
+	if hostConfig.CPUQuota > 0 && !daemon.SystemConfig().CpuCfsQuota {
 		warnings = append(warnings, "Your kernel does not support CPU cfs quota. Quota discarded.")
 		logrus.Warnf("Your kernel does not support CPU cfs quota. Quota discarded.")
-		hostConfig.CpuQuota = 0
+		hostConfig.CPUQuota = 0
 	}
 	if hostConfig.BlkioWeight > 0 && (hostConfig.BlkioWeight < 10 || hostConfig.BlkioWeight > 1000) {
 		return warnings, fmt.Errorf("Range of blkio weight is from 10 to 1000.")
@@ -528,4 +538,18 @@ func (daemon *Daemon) RegisterLinks(container *Container, hostConfig *runconfig.
 	}
 
 	return nil
+}
+
+func (daemon *Daemon) newBaseContainer(id string) Container {
+	return Container{
+		CommonContainer: CommonContainer{
+			ID:           id,
+			State:        NewState(),
+			execCommands: newExecStore(),
+			root:         daemon.containerRoot(id),
+		},
+		MountPoints: make(map[string]*mountPoint),
+		Volumes:     make(map[string]string),
+		VolumesRW:   make(map[string]bool),
+	}
 }

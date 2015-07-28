@@ -14,9 +14,11 @@ packages=(
 	builder/parser/dumper
 	daemon/events
 	daemon/execdriver/native/template
+	daemon/graphdriver/aufs
 	daemon/network
 	docker
 	dockerinit
+	image
 	integration-cli
 	pkg/chrootarchive
 	pkg/directory
@@ -27,16 +29,40 @@ packages=(
 	pkg/mount
 	pkg/namesgenerator
 	pkg/nat
+	pkg/parsers
+	pkg/parsers/filters
+	pkg/parsers/kernel
+	pkg/parsers/operatingsystem
+	pkg/pidfile
+	pkg/plugins
+	pkg/pools
+	pkg/progressreader
 	pkg/promise
+	pkg/proxy
 	pkg/pubsub
 	pkg/random
 	pkg/reexec
+	pkg/signal
+	pkg/sockets
+	pkg/streamformatter
+	pkg/stringid
+	pkg/stringutils
+	pkg/systemd
 	pkg/symlink
+	pkg/tailfile
+	pkg/tarsum
+	pkg/term
+	pkg/timeoutconn
 	pkg/timeutils
 	pkg/tlsconfig
+	pkg/truncindex
 	pkg/urlutil
+	pkg/ulimit
+	pkg/units
+	pkg/useragent
 	pkg/version
 	registry
+	runconfig
 	utils
 )
 
