@@ -352,6 +352,9 @@ func (daemon *Daemon) registerMountPoints(container *Container, hostConfig *runc
 		if err := label.Relabel(bind.Source, container.MountLabel, bind.Mode); err != nil {
 			return err
 		}
+		if err := volume.FixUidGid(container.Config.User, bind.Source, bind.Mode); err != nil {
+			return err
+		}
 		binds[bind.Destination] = true
 		mountPoints[bind.Destination] = bind
 	}
