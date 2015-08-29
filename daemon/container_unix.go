@@ -1232,7 +1232,7 @@ func (container *Container) removeMountPoints(rm bool) error {
 }
 
 func (container *Container) secretsPath() (string, error) {
-	return container.GetRootResourcePath("secrets")
+	return container.getRootResourcePath("secrets")
 }
 
 func (container *Container) setupSecretFiles() error {
@@ -1245,7 +1245,7 @@ func (container *Container) setupSecretFiles() error {
 		return err
 	}
 
-	if err := syscall.Mount("tmpfs", secretsPath, "tmpfs", uintptr(syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV), label.FormatMountLabel("", container.GetMountLabel())); err != nil {
+	if err := syscall.Mount("tmpfs", secretsPath, "tmpfs", uintptr(syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV), label.FormatMountLabel("", container.getMountLabel())); err != nil {
 		return fmt.Errorf("mounting secret tmpfs: %s", err)
 	}
 
